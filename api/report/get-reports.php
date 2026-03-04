@@ -10,18 +10,13 @@ function checkCondition($value, $condition)
 
     // 1. ทำความสะอาดข้อมูล
     $condition = trim($condition);
-
-    // ✅ เพิ่มการเปลี่ยน En Dash (–) และ Em Dash (—) ให้เป็น Hyphen (-) มาตรฐาน
     $condition = str_replace(['–', '—', '≥', '≤'], ['-', '-', '>=', '<='], $condition);
-
-    // ✅ ลบช่องว่างออกให้หมดเพื่อความแม่นยำในการเช็ค (ตัวเลขและเครื่องหมายไม่ควรมี space)
     $condition = str_replace(' ', '', $condition);
 
     // 2. กรณีช่วงคะแนน "80-89"
     if (strpos($condition, '-') !== false && strpos($condition, '-') > 0) {
         $parts = explode('-', $condition);
         if (count($parts) == 2) {
-            // ใช้ floatval แปลงค่าที่สะอาดแล้ว
             return $value >= floatval($parts[0]) && $value <= floatval($parts[1]);
         }
     }
@@ -52,19 +47,17 @@ function calculateScore($rate, $row)
     $t = floatval($row['total_target']);
     $r = floatval($row['total_result']);
 
-    // ✅ เช็คว่ามีการบันทึกข้อมูลมาจริงหรือไม่ (จาก entries_count ใน SQL)
+    // เช็คว่ามีการบันทึกข้อมูลมาจริงหรือไม่
     $has_data = isset($row['entries_count']) && $row['entries_count'] > 0;
 
-    // ✅ เงื่อนไขพิเศษ: ต้องมีการบันทึกแล้ว และ เป้า=0, ผล=0 ถึงจะได้ 5
+    // เงื่อนไขพิเศษ: ต้องมีการบันทึกแล้ว และ เป้า=0, ผล=0 ถึงจะได้ 5
     if ($has_data && $t == 0 && $r == 0) {
         return 5;
     }
 
     // กรณีทั่วไป (หรือยังไม่บันทึก)
-    if ($row['unit'] !== 'ระดับ' && $t == 0)
-        return 1;
-    if ($row['unit'] === 'ระดับ' && $r == 0)
-        return 1;
+    if ($row['unit'] !== 'ระดับ' && $t == 0) return 1;
+    if ($row['unit'] === 'ระดับ' && $r == 0) return 1;
 
     $val = floatval($rate);
     $levels = [
@@ -87,6 +80,8 @@ function calculateScore($rate, $row)
 try {
     $year = $_GET['year'] ?? (date("Y") + 543);
     $round = $_GET['round'] ?? '1';
+
+    // รับค่า amp_code (ถ้าเป็นค่าว่างหรือ null ถือว่าเป็นภาพรวมจังหวัด)
     $amp_code = isset($_GET['amp_code']) && $_GET['amp_code'] !== '' ? $_GET['amp_code'] : null;
 
     // SQL Query
@@ -133,7 +128,7 @@ try {
             END,
             MAX(ic.criteria_1), MAX(ic.criteria_2), MAX(ic.criteria_3), MAX(ic.criteria_4), MAX(ic.criteria_5),
             MAX(ic.scoring_type), ex.id, sub.code, i.indicator_sequence, 3,
-            COUNT(kr.id) AS entries_count /* ✅ นับจำนวน Record ที่ Join เจอ */
+            COUNT(kr.id) AS entries_count
         FROM indicators i
         JOIN csub_excellence sub ON i.sub_ex_id = sub.id
         JOIN cexcellence ex ON sub.ex_id = ex.id
@@ -151,7 +146,7 @@ try {
     $agg_sub = [];
     $agg_ex = [];
 
-    // Loop 1: คำนวณรายตัว (หารด้วย 5 เพื่อ Normalize)
+    // Loop 1: คำนวณรายตัว (Normalization)
     foreach ($data as $key => &$row) {
         if ($row['row_type'] == 3) {
             $t = (float) $row['total_target'];
@@ -161,9 +156,14 @@ try {
             if ($row['unit'] === 'ระดับ') {
                 $rate = floor($r);
             } elseif ($row['unit'] === 'คะแนนเต็ม 10') {
-                $rate = ($r / $t) * 10;
+                // ปกติเต็ม 10 ก็คูณ 10 (ระวัง Division by Zero)
+                $rate = ($t > 0) ? ($r / $t) * 10 : 0;
             } elseif ($row['unit'] === 'คะแนนเต็ม 50') {
-                $rate = ($r / $t) * 50;
+                // ✅ LOGIC UPDATED: ตรวจสอบ amp_code
+                // ถ้ามี amp_code (รายอำเภอ) ใช้สูตร * 50
+                // ถ้าไม่มี (ภาพรวมจังหวัด) ใช้สูตร * 100
+                $multiplier = ($amp_code !== null) ? 50 : 100;
+                $rate = ($t > 0) ? ($r / $t) * $multiplier : 0;
             } elseif ($t > 0) {
                 switch ($row['unit']) {
                     case 'อัตราต่อแสน':
@@ -179,7 +179,9 @@ try {
                         $rate = ($r / $t) * 10;
                         break;
                     case 'คะแนนเต็ม 50':
-                        $rate = ($r / $t) * 50;
+                        // ✅ LOGIC UPDATED: ใน Switch Case ด้วย
+                        $multiplier = ($amp_code !== null) ? 50 : 100;
+                        $rate = ($r / $t) * $multiplier;
                         break;
                     case 'อัตราลดลง':
                         $rate = (($t - $r) / $t) * 100;
@@ -188,18 +190,20 @@ try {
                         $rate = ($r / $t) * 100;
                 }
             }
+
             $row['calculated_rate'] = number_format($rate, 2, '.', '');
 
-            // ส่ง row ไปเช็ค (มี entries_count อยู่ข้างในแล้ว)
+            // คำนวณระดับคะแนน (1-5)
             $score = calculateScore($rate, $row);
             $weight = (float) $row['weight'];
 
-            // Normalize Weighted Score (0-1)
+            // Normalize Weighted Score (เต็ม 1) -> (score * weight) / 5
             $weighted_score = ($score * $weight) / 5;
 
             $row['score'] = $score;
             $row['weighted_score'] = number_format($weighted_score, 2, '.', '');
 
+            // รวมผลสำหรับ Level 2 และ Level 1
             $sub_code = $row['sort_sub'];
             $ex_id = $row['sort_ex'];
 
@@ -215,7 +219,7 @@ try {
     }
     unset($row);
 
-    // Loop 2: สรุปผล
+    // Loop 2: สรุปผล Level 2 และ Level 1
     foreach ($data as &$row) {
         if ($row['row_type'] == 2) {
             $sub_code = $row['sort_sub'];
@@ -223,6 +227,7 @@ try {
         } elseif ($row['row_type'] == 1) {
             $ex_id = $row['sort_ex'];
             if (isset($agg_ex[$ex_id]) && $agg_ex[$ex_id]['sum_weight'] > 0) {
+                // คำนวณ % ความสำเร็จของ Excellence
                 $percentage = ($agg_ex[$ex_id]['sum_weighted'] / $agg_ex[$ex_id]['sum_weight']) * 100;
                 $row['weighted_score'] = number_format($percentage, 2, '.', '') . '%';
             } else {

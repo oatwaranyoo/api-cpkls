@@ -43,6 +43,22 @@ try {
                             / NULLIF(SUM(r.target_amount), 0)
                         , 2)
                     , 0)
+                    
+                WHEN i.unit = 'คะแนนเต็ม 10' THEN -- แก้คำผิดจาก คะแน เป็น คะแนน (ถ้าใน DB เก็บถูก)
+                    COALESCE(
+                        ROUND(
+                            COALESCE(SUM(r.result_amount), 0) * 10
+                            / NULLIF(SUM(r.target_amount), 0)
+                        , 2)
+                    , 0)
+                    
+                WHEN i.unit = 'คะแนนเต็ม 50' THEN -- แก้คำผิดจาก คะแน เป็น คะแนน
+                    COALESCE(
+                        ROUND(
+                            COALESCE(SUM(r.result_amount), 0) * 100
+                            / NULLIF(SUM(r.target_amount), 0)
+                        , 2)
+                    , 0)
 
                 WHEN i.unit = 'อัตราต่อแสน' THEN 
                     COALESCE(
@@ -56,6 +72,15 @@ try {
                     COALESCE(
                         ROUND(
                             COALESCE(SUM(r.result_amount), 0) * 1000
+                            / NULLIF(SUM(r.target_amount), 0)
+                        , 2)
+                    , 0)
+
+                -- ✅ เพิ่มส่วนอัตราลดลง
+                WHEN i.unit = 'อัตราลดลง' THEN 
+                    COALESCE(
+                        ROUND(
+                            (COALESCE(SUM(r.target_amount), 0) - COALESCE(SUM(r.result_amount), 0)) * 100
                             / NULLIF(SUM(r.target_amount), 0)
                         , 2)
                     , 0)
@@ -79,11 +104,11 @@ try {
         FROM indicators i
         INNER JOIN indicator_assignees ia 
             ON i.id = ia.indicator_id 
-        AND ia.user_id = :uid 
+            AND ia.user_id = :uid 
 
         LEFT JOIN kpi_results r 
             ON i.id = r.indicator_id 
-        AND r.fiscal_year = :year
+            AND r.fiscal_year = :year
 
         WHERE i.status = 'ACTIVE'
         GROUP BY i.id
@@ -108,8 +133,8 @@ try {
         $result = (float) $row['total_result'];
 
         // ใช้ค่าจาก SQL เป็นหลัก
-        $calcPercent = isset($row['calc_percent']) 
-            ? (float) $row['calc_percent'] 
+        $calcPercent = isset($row['calc_percent'])
+            ? (float) $row['calc_percent']
             : 1;
 
         // แสดงผล percentage
@@ -133,11 +158,8 @@ try {
     }
 
     Response::success($data);
-
-
 } catch (Exception $e) {
     error_log("API Error (kpi/my-list.php): " . $e->getMessage());
     $code = ($e->getCode() >= 100 && $e->getCode() <= 599) ? $e->getCode() : 500;
     Response::error($e->getMessage(), $code);
 }
-?>

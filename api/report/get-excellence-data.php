@@ -177,7 +177,7 @@ try {
         else {
             // 3.1 คำนวณ Rate (ผลงาน)
             if ($row['unit'] === 'ระดับ') {
-                $rate = $r;
+                $rate = floor($r);
             } elseif ($t > 0) {
                 switch ($row['unit']) {
                     case 'อัตราต่อแสน':
@@ -189,6 +189,9 @@ try {
                     case 'อัตราลดลง':
                         // สูตร: (เป้า - ผล) / เป้า * 100
                         $rate = (($t - $r) / $t) * 100;
+                        break;
+                    case 'คะแนนเต็ม 50':
+                        $rate = ($r / $t) * 100;
                         break;
                     default: // ร้อยละ หรือ อื่นๆ
                         $mul = (float) ($row['multiplier'] ?? 100);
@@ -213,9 +216,7 @@ try {
         'status' => 'success',
         'data' => $data
     ]);
-
 } catch (Exception $e) {
     http_response_code(500);
     echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
 }
-?>
